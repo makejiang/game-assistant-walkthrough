@@ -1,0 +1,4 @@
+{
+  "明末渊虚之羽": {"threshold": 0.80, "threshold_2": 0.01},
+  "识质存在": {"threshold": 0.80, "threshold_2": 0.03}
+}

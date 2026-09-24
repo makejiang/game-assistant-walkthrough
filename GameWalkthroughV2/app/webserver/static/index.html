@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes">
+<link rel="icon" href="data:,">
+<title>游戏攻略助手</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: "Microsoft YaHei UI", "PingFang SC", "HarmonyOS Sans SC", sans-serif;
+    background: #f5f6f8;
+  }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ---------------- 顶栏：Intel AI游戏助手 × 游民星空 ---------------- */
+  header {
+    flex: 0 0 auto;
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px;
+    background: #14181f;
+    color: #e8f1ff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.35);
+    z-index: 5;
+  }
+  /* 品牌区：固定字号（不做自动缩小），intel/AI/游戏助手 三段文字按同一
+     基线对齐（align-items:baseline 等价于一行连续文字的效果，各浏览器渲染
+     一致；flex-end 对齐的是盒子底边，会随字体度量在不同浏览器上漂移）。
+     宽度不足时品牌区整体换行到第二行 */
+  .brand {
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: 2px 8px; flex: 1 1 auto; min-width: 0; white-space: nowrap;
+  }
+  .brand .part.gs { display: inline-flex; align-items: center; gap: 8px; }
+  .brand .part.tb { display: inline-flex; align-items: center; gap: 0; }
+  .brand .lockup { display: inline-flex; align-items: baseline; gap: 2px; }
+  .brand .intel { font-size: 20px; font-weight: 800; color: #4aa8ff; letter-spacing: 0.5px; line-height: 1; }
+  .brand .ai { font-size: 16px; font-weight: 600; color: #e8f1ff; margin-left: 1px; line-height: 1; }
+  .brand .ai2 { font-size: 16px; font-weight: 600; color: #e8f1ff; margin-left: 1px; line-height: 1; }
+  .brand .x { font-size: 14px; color: #6b7a90; line-height: 1; }
+  .brand .gs { font-size: 16px; font-weight: 700; color: #ff8c1f; letter-spacing: 1px; line-height: 1; }
+  .brand .glogo { width: 24px; height: 24px; border-radius: 4px; background: #fff; }
+  #locateBtn {
+    flex: 0 0 auto; margin-left: auto;
+    border: 1px solid #3f4f6a; border-radius: 6px;
+    background: #1d2530; color: #cfe0f5;
+    font-size: 12px; padding: 6px 10px; cursor: pointer;
+  }
+  #locateBtn:hover { background: #27313f; }
+  #locateBtn:active { transform: translateY(1px); }
+
+  /* ---------------- 下载进度条：攻略下载中常驻，终态短暂提示后收起 ---------- */
+  #dlBanner {
+    flex: 0 0 auto;
+    display: none;
+    padding: 7px 14px 9px;
+    background: #10141b;
+    border-bottom: 1px solid #232c3a;
+  }
+  #dlBanner.on { display: block; }
+  #dlBanner .dl-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  #dlBanner .dl-spin {
+    flex: 0 0 auto; width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid #2c3746; border-top-color: #ff8c1f;
+    animation: spin .8s linear infinite;
+  }
+  #dlBanner.done .dl-spin { animation: none; border-color: #46a758; background: #46a758; }
+  #dlBanner.error .dl-spin { animation: none; border-color: #e5484d; background: #e5484d; }
+  #dlText {
+    flex: 0 1 auto; min-width: 0; font-size: 13px; color: #e8f1ff;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #dlPct { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: #ff8c1f; }
+  #dlBanner.done #dlPct { color: #46a758; }
+  #dlBanner.error #dlPct { color: #e5484d; }
+  #dlDetail {
+    margin-top: 3px; font-size: 11px; color: #8391a5;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 下载失败时横幅右侧的“重试”按钮（仅失败态展示，且不自动收起横幅） */
+  #dlRetry {
+    display: none; flex: 0 0 auto;
+    border: 1px solid #5b3136; border-radius: 6px;
+    background: #2a1a1d; color: #ffb4b8;
+    font-size: 12px; padding: 4px 12px; cursor: pointer;
+  }
+  #dlRetry:hover { background: #37211f; }
+  #dlRetry:active { transform: translateY(1px); }
+  #dlRetry:disabled { opacity: .55; cursor: default; }
+  #dlBanner.show-retry #dlRetry { display: inline-block; }
+  #dlBar {
+    margin-top: 5px; height: 4px; border-radius: 2px;
+    background: #232c3a; overflow: hidden;
+  }
+  #dlFill {
+    height: 100%; width: 0; border-radius: 2px;
+    background: linear-gradient(90deg, #ff8c1f, #ffb25e);
+    transition: width .4s ease;
+  }
+  /* 总数未知（indeterminate）：进度块左右往复滑动 */
+  #dlBanner:not(.det) #dlFill { width: 34%; animation: dlslide 1.3s ease-in-out infinite; }
+  #dlBanner.done #dlFill { background: #46a758; width: 100%; }
+  #dlBanner.error #dlFill { background: #e5484d; }
+  @keyframes dlslide { 0% { margin-left: -34%; } 100% { margin-left: 100%; } }
+
+  /* ---------------- 底部导航栏：上一页 | 目录列表 | 下一页 ---------------- */
+  #nav {
+    flex: 0 0 auto; height: 40px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 10px; background: #14181f;
+  }
+  #nav button, #nav select {
+    flex: 0 0 auto; height: 28px;
+    border: 1px solid #3f4f6a; border-radius: 5px;
+    background: #1d2530; color: #cfe0f5; font-size: 13px;
+    padding: 0 12px; cursor: pointer; white-space: nowrap;
+  }
+  #nav button:hover { background: #27313f; }
+  #nav select { flex: 1 1 auto; min-width: 0; text-align: center; }
+
+  /* ---------------- 内容区：frame ----------------
+     桌面：frame 铺满，内部滚动。
+     小屏（手机/窄平板）：frame 固定按 1200px 设计宽渲染，整体 transform 等比
+     缩放，滚动交给父页面原生滚动，双指缩放可用。 */
+  main { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  main.mobile { overflow-y: auto; overflow-x: hidden; }
+  #wrap { position: absolute; inset: 0; overflow: hidden; }
+  main.mobile #wrap { position: relative; inset: auto; overflow: visible; }
+  #frame { width: 100%; height: 100%; border: 0; background: #fff; display: none; }
+  #frame.ready { display: block; }
+
+  #empty {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; color: #6b7a90; background: #f5f6f8;
+  }
+  #empty .icon { font-size: 42px; }
+  #empty .text { font-size: 15px; }
+
+  #loading {
+    position: absolute; inset: 0;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; background: rgba(245,246,248,.92); color: #6b7a90; font-size: 13px;
+    z-index: 4;
+  }
+  #loading.on { display: flex; }
+  .spinner {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 3px solid #d6dee9; border-top-color: #ff8c1f;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #status {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+    max-width: 82%;
+    background: rgba(20,24,31,.92); color: #e8f1ff;
+    font-size: 13px; padding: 8px 16px; border-radius: 18px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.3);
+    opacity: 0; transition: opacity .25s; pointer-events: none;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    z-index: 6;
+  }
+  #status.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand" title="游民星空 × Intel AI游戏助手">
+      <span class="part gs">
+        <img class="glogo" alt="游民星空" src="https://www.gamersky.com/favicon.ico"
+             onerror="this.style.display='none'">
+        <span class="gs">游民星空</span>
+        <span class="x">×</span>
+      </span>
+      <span class="part tb">
+        <span class="lockup"><span class="intel">intel</span><span class="ai">AI</span></span><span class="ai2">游戏助手</span>
+      </span>
+    </div>
+    <button id="locateBtn" type="button" title="回到当前场景位置">回到场景</button>
+  </header>
+  <div id="dlBanner">
+    <div class="dl-row">
+      <span class="dl-spin"></span>
+      <span id="dlText">正在下载攻略…</span>
+      <span id="dlPct"></span>
+      <button id="dlRetry" type="button" title="从失败处继续下载">重试</button>
+    </div>
+    <div id="dlBar"><div id="dlFill"></div></div>
+    <div id="dlDetail"></div>
+  </div>
+  <main id="main">
+    <div id="empty">
+      <div class="icon">🎮</div>
+      <div class="text">进入游戏后开始展示攻略</div>
+    </div>
+    <div id="wrap"><iframe id="frame" referrerpolicy="no-referrer" allowfullscreen></iframe></div>
+    <div id="loading"><div class="spinner"></div><div>正在加载攻略页面…</div></div>
+  </main>
+  <nav id="nav">
+    <button id="prevBtn" type="button" title="上一页">上一页</button>
+    <select id="tocSelect" title="目录列表">
+      <option value="">目录列表</option>
+    </select>
+    <button id="nextBtn" type="button" title="下一页">下一页</button>
+  </nav>
+</div>
+<div id="status"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var frame = document.getElementById("frame");
+  var wrap = document.getElementById("wrap");
+  var main = document.getElementById("main");
+  var emptyBox = document.getElementById("empty");
+  var loadingBox = document.getElementById("loading");
+  var locateBtn = document.getElementById("locateBtn");
+  var statusBox = document.getElementById("status");
+  var tocSelect = document.getElementById("tocSelect");
+  var dlBanner = document.getElementById("dlBanner");
+  var dlText = document.getElementById("dlText");
+  var dlPct = document.getElementById("dlPct");
+  var dlDetail = document.getElementById("dlDetail");
+  var dlFill = document.getElementById("dlFill");
+  var dlRetry = document.getElementById("dlRetry");
+
+  // 小屏（手机/窄平板）：优先展示 wap 手机版页面（自适应排版）；无法映射的
+  // 地址退回 PC 版 + 固定设计宽等比缩放模式。桌面端始终用 PC 版原样展示。
+  var IS_MOBILE = !!(window.matchMedia && matchMedia("(max-width: 820px)").matches);
+  var VIRTUAL_W = 1200;      // 游民星空桌面版设计宽度
+  var currentScale = 1;
+  var fluidMode = false;     // 当前展示的是自适应页面（wap），无需缩放/高度同步
+
+  // PC 版攻略页 URL -> wap 手机版 URL（分页一一对应，图片 ID 两版一致）
+  //   https://www.gamersky.com/handbook/202507/1961684_6.shtml
+  //   -> https://wap.gamersky.com/gl/Content-1961684_6.html
+  function toDisplayUrl(url) {
+    if (!IS_MOBILE) return url;
+    var m = String(url).match(/^https?:\/\/[^\/]*gamersky\.com\/.*?\/(\d{5,})(?:_(\d+))?\.shtml(?:[?#].*)?$/i);
+    if (!m) return url;
+    return "https://wap.gamersky.com/gl/Content-" + m[1] + (m[2] ? "_" + parseInt(m[2], 10) : "") + ".html";
+  }
+
+  // 新版路书页（guide-map/roadbooks/<id>）：代理已裁掉站点导航只留正文，
+  // 手机上与 wap 自适应页一样铺满展示，不做小屏缩放
+  var ROADBOOK_URL_RE = /guide-map\/roadbooks\//i;
+
+  // 当前目标（来自 webserver 推送）
+  var current = { game: "", url: "", imageSrc: "", imageIndex: -1, title: "" };
+
+  // -------------------------------------------------------------- 定位诊断
+  // 页面地址带 ?debug=1 时，左下角显示最近几次定位的判定路径（用于排查
+  // “回到场景/推送定位落点不对”一类问题：能看到走的哪条回退路径）
+  var DEBUG = /[?&]debug=1/.test(location.search || "");
+  var dbgBox = null;
+  var dbgLines = [];
+  if (DEBUG) {
+    dbgBox = document.createElement("div");
+    dbgBox.style.cssText = "position:fixed;left:8px;bottom:56px;z-index:99999;max-width:78%;"
+      + "max-height:42%;overflow:auto;background:rgba(0,0,0,.85);color:#9fe08f;"
+      + "font:11px/1.5 Consolas,monospace;padding:6px 9px;border-radius:6px;"
+      + "pointer-events:none;white-space:pre-wrap;text-shadow:0 1px 2px #000;";
+    document.body.appendChild(dbgBox);
+  }
+  function dbgLog(line) {
+    if (!DEBUG) return;
+    var t = new Date();
+    var ts = ("0" + t.getHours()).slice(-2) + ":" + ("0" + t.getMinutes()).slice(-2) + ":"
+      + ("0" + t.getSeconds()).slice(-2);
+    dbgLines.push("[" + ts + "] " + line);
+    if (dbgLines.length > 7) dbgLines.shift();
+    dbgBox.textContent = dbgLines.join("\n");
+  }
+  function describeScene() {
+    return "idx=" + current.imageIndex + " src=" + (current.imageSrc.split("/").pop() || "(空)")
+      + " url#" + (String(current.url).split("#")[1] || "(无)");
+  }
+  function describeEl(el) {
+    if (!el) return "(无)";
+    var tag = el.tagName || "?";
+    var id = "";
+    try { id = el.id || ""; } catch (e) { /* 忽略 */ }
+    var cls = "";
+    try { cls = typeof el.className === "string" ? el.className.split(/\s+/)[0] : ""; } catch (e) { /* 忽略 */ }
+    return tag + (id ? "#" + id : "") + (cls ? "." + cls : "");
+  }
+  var loadedUrl = "";        // frame 当前实际加载的原始 URL
+  var locateToken = 0;       // frame 变化时使旧的定位/校正失效
+  var userInteracted = false; // 用户开始滚动后停止自动校正
+  var autoLocatePending = false; // 仅推送驱动的页面加载才自动定位（用户自己翻页不打扰）
+  var fragmentOnlyPending = false; // 目录跳章：加载完成后只按 #片段 定位（跳过图片匹配）
+  var fragmentLocateUrl = "";      // 目录跳章时的目标地址（openUrl 的 url，而非过期的 current.url）
+  var escapeRetries = 0;     // frame 被站内 JS 跳去跨域页面时的拉回次数
+  var loadingTimer = null;
+  var statusTimer = null;
+  var heightTimer = null;    // 小屏模式下同步 frame 高度的定时器
+
+  // 路径式代理：真实地址保留在路径里，站点 JS 解析 location 才能拿到
+  // 正确的文章/页码（翻页按钮依赖它），frame 内相对跳转也能正确解析。
+  function proxyUrl(url) { return "/proxy/" + encodeURI(url); }
+
+  function showLoading(on) {
+    loadingBox.classList.toggle("on", !!on);
+    if (loadingTimer) { clearTimeout(loadingTimer); loadingTimer = null; }
+    if (on) {
+      loadingTimer = setTimeout(function () { showLoading(false); }, 15000);
+    }
+  }
+
+  function statusToast(text) {
+    statusBox.textContent = text || "";
+    statusBox.classList.add("on");
+    if (statusTimer) clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () { statusBox.classList.remove("on"); }, 3000);
+  }
+
+
+  // ------------------------------------------------------------ 目标应用
+  // 文章页标识：PC 版与 wap 版 URL 形态不同但文章 id/页码一致
+  function pageKey(u) {
+    var s = String(u || "");
+    var m = s.match(/(\d{5,})(?:_(\d+))?\.(?:s?html|htm)/i);
+    if (m) return m[1] + "_" + (m[2] || "1");
+    // 新版路书页（guide-map/roadbooks/<id>）：frame 地址是
+    // http://<本机>/proxy/https://...，推送地址是原始 URL——剥掉
+    // origin+/proxy/ 前缀和协议再比较；保留 #片段 以区分路书节点
+    return s
+      .replace(/^https?:\/\/[^\/]+\/proxy\//i, "")
+      .replace(/^\/proxy\//i, "")
+      .replace(/^https?:\/\//i, "")
+      .toLowerCase();
+  }
+
+  // frame 当前真实地址（用户在 frame 内翻页后与 loadedUrl 不同）
+  function frameLocationHref() {
+    try {
+      var loc = frame.contentDocument && frame.contentDocument.location;
+      return loc ? String(loc.href || "") : "";
+    } catch (e) { return ""; }
+  }
+
+  function frameOnTargetPage() {
+    // 与 frameOnSameDocument 同一判定（文档级，站点改写自身查询参数也算同一
+    // 路书文档）：路书页内的滚动/片段定位不会改变 frame 地址，若按完整地址
+    // 比较，“回到场景”会误判“已翻页离开”而退到节点标题
+    return frameOnSameDocument(current.url);
+  }
+
+  // 文档标识：去掉 #片段 后比较——同一文档仅片段不同（新版路书换节点）时
+  // 不整页重载，直接在当前文档内定位
+  function docKey(u) {
+    return pageKey(String(u || "").split("#")[0]);
+  }
+
+  // 路书文档标识：guide-map/roadbooks/<id> 的 id——SPA 水合后可能改写自身
+  // 地址（查询参数等），按 id 判断是否仍是同一份路书文档
+  function roadbookId(u) {
+    var m = String(u || "").match(/guide-map\/roadbooks\/(\d+)/i);
+    return m ? m[1] : "";
+  }
+
+  function frameOnSameDocument(url) {
+    var href = frameLocationHref();
+    if (!href) return false;
+    if (docKey(href) === docKey(url)) return true;
+    var rid = roadbookId(url);
+    return !!rid && rid === roadbookId(href);
+  }
+
+  // 当前 frame 文档（可访问时）；路书页的节点跳转/片段定位都在它上面做
+  function frameDoc() {
+    try {
+      var doc = frame.contentDocument;
+      return doc && doc.body ? doc : null;
+    } catch (e) { return null; }
+  }
+
+  function applyTarget(target) {
+    current.game = target.game || current.game || "";
+    current.url = (target.url || "").trim();
+    current.imageSrc = (target.image_src || "").trim();
+    current.imageIndex = (typeof target.image_index === "number") ? target.image_index : -1;
+    if (target.title) { current.title = target.title; }
+    if (!current.url) return;
+    // 新推送是图片级定位：清掉目录跳章遗留的片段优先标记，避免后续的
+    // 推送定位/回到场景被降级成只到节点标题
+    fragmentOnlyPending = false;
+    dbgLog("推送目标: " + describeScene());
+
+    emptyBox.style.display = "none";
+    if (frameOnTargetPage() && current.url === loadedUrl) {
+      // 确实还在推送页上：只重新定位；frame 不可访问时重新经代理打开
+      if (!locate()) openUrl(current.url, true, { noFragmentJump: true });
+    } else if (loadedUrl && frameOnSameDocument(current.url)) {
+      // 同一文档仅节点片段不同（新版路书换节点/换图；loadedUrl 非空表示
+      // 该文档确由我们经代理打开过）：不重载 3MB+ 的路书页，直接在当前
+      // 文档内按图片（优先）或 #片段 重新定位
+      loadedUrl = current.url;
+      syncTocSelection();
+      if (!locate()) openUrl(current.url, true, { noFragmentJump: true });
+    } else {
+      // 用户已翻页离开（或新页面）：重新打开推送页并定位
+      escapeRetries = 0;
+      openUrl(current.url, true, { noFragmentJump: true });
+    }
+  }
+
+  // 目录列表点选路书节点（同一文档仅 #片段 不同）：不重载 frame，
+  // 直接滚动到对应节点卡（即该节点的图片/图文位置）。节点暂时找不到
+  // （SPA 水合中）时短暂轮询，绝不整页重载。
+  function jumpToFragment(url) {
+    var pos = String(url).indexOf("#");
+    if (pos < 0) return false;
+    if (!loadedUrl) return false;   // frame 还没由我们打开过：走正常加载
+    var doc = frameDoc();
+    if (!doc || !frameOnSameDocument(url)) return false;
+    var id = url.slice(pos + 1);
+    var el = null;
+    try { el = doc.getElementById(id); } catch (e) { el = null; }
+    if (!el && !ROADBOOK_URL_RE.test(url)) return false;   // 非路书页维持原判定
+    loadedUrl = url;
+    // 作废未完成的定位/校正：旧场景的 scheduleReSnap 会在 1.5~6s 后把页面
+    // 拽回上一次定位的位置（表现“跳过去的章节又弹回来”）
+    var token = ++locateToken;
+    userInteracted = false;
+    syncTocSelection();   // 目录下拉跟随所选章节
+    if (el) {
+      scrollToRoadbookNode(el);
+      return true;
+    }
+    var tries = 0;
+    (function poll() {
+      if (token !== locateToken) return;
+      var d = frameDoc();
+      var n = null;
+      try { n = d ? d.getElementById(id) : null; } catch (e) { n = null; }
+      if (n) { scrollToRoadbookNode(n); return; }
+      if (++tries < 12) { setTimeout(poll, 300); return; }   // ~3.5s
+      statusToast("暂未找到所选章节位置");
+    })();
+    return true;
+  }
+
+  function scrollToRoadbookNode(el) {
+    scrollToElement(el, "start");
+    lastTarget = { el: el, block: "start" };
+    var label = "";
+    try {
+      var header = el.querySelector(".reader-node-card__header");
+      label = header ? (header.textContent || "").replace(/\s+/g, " ").trim().slice(0, 40) : "";
+    } catch (e) { label = ""; }
+    statusToast(label ? "已定位到「" + label + "」" : "已定位到所选章节");
+  }
+
+  function openUrl(url, autoLocate, opts) {
+    // noFragmentJump: 图片级指令（回到场景/场景推送）不得被目录跳章的
+    // 节点级拦截截胡——那会滚到章节标题而不是目标图片
+    if (!(opts && opts.noFragmentJump) && jumpToFragment(url)) return;
+    loadedUrl = url;
+    loadedUrl = url;
+    locateToken += 1;
+    userInteracted = false;
+    autoLocatePending = autoLocate !== false;   // 推送驱动时加载完成后自动定位
+    // 手动跳章（目录点选不触发场景定位）对带 #片段 的路书地址也要定位：
+    // 加载完成后只按“本次打开地址”的片段滚到目标节点，不做图片匹配，
+    // 更不能用 current.url——它还停留在上一次推送的旧章节
+    if (!autoLocatePending && String(url).indexOf("#") >= 0 && ROADBOOK_URL_RE.test(toDisplayUrl(url))) {
+      fragmentOnlyPending = true;
+      fragmentLocateUrl = url;
+      autoLocatePending = true;
+    } else {
+      fragmentLocateUrl = "";
+    }
+    showLoading(true);
+    frame.classList.add("ready");
+    var display = toDisplayUrl(url);
+    // 新版路书页（桌面排版但正文自适应）与 wap 页一样铺满，不做小屏缩放
+    fluidMode = IS_MOBILE && (display.indexOf("wap.gamersky.com") >= 0 || ROADBOOK_URL_RE.test(display));
+    if (IS_MOBILE) {
+      if (fluidMode) {
+        // 自适应页面：铺满即可，不需要缩放/高度同步
+        main.classList.remove("mobile");
+        frame.style.width = "100%";
+        frame.style.transform = "none";
+        wrap.style.height = "";
+      } else {
+        main.classList.add("mobile");
+        frame.style.width = VIRTUAL_W + "px";
+        fitScale();
+      }
+    }
+    frame.src = proxyUrl(display);
+    syncTocSelection();
+    loadToc();   // 目录懒加载：页面一展示就开拉，点开下拉时目录已就绪
+  }
+
+  // ------------------------------------------------------------ 小屏缩放
+  function fitScale() {
+    if (!IS_MOBILE || fluidMode) return;
+    currentScale = Math.max(0.05, main.clientWidth / VIRTUAL_W);
+    frame.style.transform = "scale(" + currentScale + ")";
+    frame.style.transformOrigin = "0 0";
+    syncFrameHeight();
+  }
+
+  // frame 高度同步为整页内容高度 -> frame 内部不滚动，滚动全部发生在父页面
+  function syncFrameHeight() {
+    if (!IS_MOBILE || fluidMode) return;
+    var h = 0;
+    try {
+      var doc = frame.contentDocument;
+      if (doc && doc.documentElement) {
+        h = Math.max(doc.documentElement.scrollHeight || 0, (doc.body && doc.body.scrollHeight) || 0);
+      }
+    } catch (e) { h = 0; }
+    if (h > 0) wrap.style.height = Math.ceil(h * currentScale) + "px";
+  }
+
+  function startHeightSync() {
+    if (!IS_MOBILE || fluidMode || heightTimer) return;
+    heightTimer = setInterval(function () {
+      if (locateToken === 0) return;
+      var before = wrap.style.height;
+      syncFrameHeight();
+      fitScale();
+      if (before !== wrap.style.height && !userInteracted) resnap();
+    }, 500);
+    setTimeout(function () {  // 页面稳定后降低同步频率
+      if (heightTimer) { clearInterval(heightTimer); heightTimer = null; }
+    }, 30000);
+  }
+
+  function resnap() {
+    if (lastTarget) scrollToElement(lastTarget.el, lastTarget.block);
+  }
+
+  var lastTarget = null;   // { el, block }：布局变化时重新对准
+
+  // 小屏缩放模式下 frame 内部不滚动，需要手动换算父页面滚动位置；
+  // 桌面模式与 wap 自适应模式直接 scrollIntoView。
+  function scrollToElement(el, block) {
+    if (!el || !el.isConnected) return;
+    if (!IS_MOBILE || fluidMode) {
+      el.scrollIntoView({ block: block, behavior: "auto" });
+      return;
+    }
+    var doc = el.ownerDocument;
+    var top = el.getBoundingClientRect().top;
+    try { top += (doc.documentElement.scrollTop || doc.body.scrollTop || 0); } catch (e) {}
+    var scaled = top * currentScale;
+    var target = block === "center"
+      ? scaled - main.clientHeight / 2 + Math.min(el.offsetHeight * currentScale, main.clientHeight / 4)
+      : scaled - 16;
+    main.scrollTop = Math.max(0, Math.round(target));
+  }
+
+  // ------------------------------------------------------------ URL 工具
+  function docBase(doc) {
+    try { return (doc.baseURI || doc.location.href) + ""; }
+    catch (e) { return "https://www.gamersky.com/"; }
+  }
+
+  // 游民星空图片链接可能是 showimage 包装，先还原出真实图片地址再解析为绝对 URL
+  function normalizeUrl(raw, base) {
+    if (!raw) return "";
+    var u = String(raw).trim();
+    if (u.indexOf("showimage") >= 0) {
+      var i = u.indexOf("?");
+      if (i >= 0) {
+        u = u.slice(i + 1);
+        try { u = decodeURIComponent(u); } catch (e) { /* 保持原样 */ }
+      }
+    }
+    try { return new URL(u, base).href; } catch (e) { return u; }
+  }
+
+  function stripScheme(u) { return String(u || "").replace(/^https?:\/\//i, "").toLowerCase(); }
+
+  function fileName(u) {
+    var parts = String(u || "").split("?")[0].split("#")[0].split("/");
+    return parts[parts.length - 1].toLowerCase();
+  }
+
+  function isPlaceholderSrc(src) {
+    var s = String(src || "").toLowerCase();
+    if (!s) return true;
+    return s.indexOf("blank") >= 0 || s.indexOf("loading") >= 0 || s.indexOf("placeholder") >= 0;
+  }
+
+  // 图片的真实地址候选（按优先级）：
+  //   1) 懒加载属性 data-original / data-src
+  //   2) 外层 <a href="showimage?真图URL"> 包装链接（游民星空正文截图的实际情况：
+  //      img 自身只有 blank 占位图，真图地址藏在包装锚点的 href 里）
+  //   3) src 本身（非占位图时）
+  function anchorRealUrl(img, base) {
+    var a = img.closest ? img.closest("a[href]") : null;
+    if (!a) return "";
+    var href = a.getAttribute("href") || "";
+    if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0) return "";
+    return normalizeUrl(href, base);
+  }
+
+  function imgCandidates(img, base) {
+    var forms = [];
+    var lazy = img.getAttribute("data-original") || img.getAttribute("data-src");
+    if (lazy) forms.push(normalizeUrl(lazy, base));
+    var anchor = anchorRealUrl(img, base);
+    if (anchor) forms.push(anchor);
+    var plain = normalizeUrl(img.getAttribute("src") || img.currentSrc || "", base);
+    if (plain && !isPlaceholderSrc(plain)) forms.push(plain);
+    return forms;
+  }
+
+  // ------------------------------------------------------------ 定位
+  // 关键：线上页面的截图 src 全部是 blank 占位图（真图地址在 data-src 或外层
+  // <a href="showimage?真图URL"> 里），页面加载完成时整页图片是塌缩的，直接
+  // scrollIntoView 会停在错误位置。这里先把正文图片强制换成真图（绕过站点
+  // 懒加载），等目标图片渲染出高度后再滚动，并在图片陆续加载导致布局变化时
+  // 多次校正（用户一旦手动滚动/触摸立即停止）。
+  // 匹配键做了归一化：页面 img 放的是 `_S` 缩略图（14010_S.jpg），推送的是
+  // 全尺寸图名（14010.jpg），比较时忽略该后缀及 http/https、查询参数差异。
+  // PC 版正文容器是 .Mid2L_con；新版路书页是 .reader-node-stream（节点流）；
+  // wap 手机版容器类名不同，按常见值探测，兜底 body。
+  var CONTENT_SELECTORS = [".Mid2L_con", ".reader-node-stream", ".guide-content-main", ".content", "#content", ".article-content", ".text-content"];
+  function contentScope(doc) {
+    for (var i = 0; i < CONTENT_SELECTORS.length; i++) {
+      var el = doc.querySelector(CONTENT_SELECTORS[i]);
+      if (el) return el;
+    }
+    return doc.body;
+  }
+
+  // 新版路书页地址带 #reader-node-<id> 片段（目录选择、章节推送），按 id 找节点卡
+  function fragmentTarget(doc, url) {
+    var source = String(url || current.url || "");
+    var pos = source.indexOf("#");
+    if (pos < 0) return null;
+    var id = source.slice(pos + 1);
+    if (!id) return null;
+    try { return doc.getElementById(id); } catch (e) { return null; }
+  }
+
+  function forceReveal(doc, base) {
+    var scope = contentScope(doc);
+    if (!scope) return;
+    var imgs = scope.querySelectorAll("img");
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (!isPlaceholderSrc(img.getAttribute("src"))) continue;
+      var lazy = img.getAttribute("data-original") || img.getAttribute("data-src");
+      var real = lazy || anchorRealUrl(img, base);
+      if (real) img.src = normalizeUrl(real, base);
+    }
+  }
+
+  // 规范化比较键：去协议、去查询参数；文件名去掉 `_S` 缩略图后缀和 `!` 缩放后缀
+  function canonical(u) {
+    var parts = stripScheme(u).split("?")[0].split("/");
+    var f = parts[parts.length - 1];
+    f = f.replace(/_s\.([a-z0-9]+)$/i, ".$1");
+    f = f.split("!")[0];
+    parts[parts.length - 1] = f;
+    return parts.join("/");
+  }
+
+  function matchTarget(doc, base) {
+    var target = normalizeUrl(current.imageSrc, base);
+    if (!target) return null;
+    var tNoScheme = stripScheme(target);
+    var tCanon = canonical(target);
+    var tFile = fileName(tCanon);
+    var imgs = contentScope(doc).querySelectorAll("img");
+    var byFile = null;
+    var byContains = null;
+    var samples = [];
+    for (var i = 0; i < imgs.length; i++) {
+      var forms = imgCandidates(imgs[i], base);
+      if (!forms.length) continue;
+      if (samples.length < 3) samples.push(forms[0]);
+      for (var j = 0; j < forms.length; j++) {
+        var form = forms[j];
+        var canon = canonical(form);
+        if (stripScheme(form) === tNoScheme || canon === tCanon) return imgs[i]; // 1) 精确匹配（含缩略图名归一）
+        if (!byFile && tFile && fileName(canon) === tFile) byFile = imgs[i];     // 2) 文件名相同
+        if (!byContains && tCanon.length > 8 &&
+            (canon.indexOf(tCanon) >= 0 || tCanon.indexOf(canon) >= 0)) {
+          byContains = imgs[i];                                // 3) 路径互含（缩放/水印后缀等）
+        }
+      }
+    }
+    if (byFile) return byFile;
+    if (byContains) return byContains;
+    // 便于排查：浏览器控制台(F12)里能看到推送值与页面图片的差别
+    console.warn("[攻略定位] 未匹配到目标图片。推送:", current.imageSrc, "页面图片样例:", samples);
+    return null;
+  }
+
+  function armUserGuard(doc) {
+    var events = ["wheel", "touchstart", "pointerdown", "keydown"];
+    for (var i = 0; i < events.length; i++) {
+      doc.addEventListener(events[i], function () { userInteracted = true; }, { passive: true });
+    }
+  }
+
+  // 父页面上的用户操作同样视为“用户已介入”（滚动容器可能是 main）
+  (function () {
+    var events = ["wheel", "touchstart", "pointerdown", "keydown"];
+    for (var i = 0; i < events.length; i++) {
+      main.addEventListener(events[i], function () { userInteracted = true; }, { passive: true });
+    }
+  })();
+
+  function locate() {
+    var token = ++locateToken;
+    var doc = frameDoc();
+    if (!doc) return false;
+
+    var base = docBase(doc);
+    forceReveal(doc, base);
+
+    var hadImageTarget = !!current.imageSrc;
+    var el = null;
+    var viaFragment = false;
+    var fragUrl = current.url;
+    var fragmentOnly = false;
+    if (fragmentOnlyPending) {
+      // 目录跳章：只认“本次打开地址”的 #片段——current.url 还停留在上一次
+      // 推送的旧章节，用它会把页面拽回旧章节（跳章后又弹回顶部的原因）
+      fragmentOnlyPending = false;
+      fragmentOnly = true;
+      fragUrl = fragmentLocateUrl || current.url;
+      el = fragmentTarget(doc, fragUrl);
+      viaFragment = !!el;
+    } else {
+      fragmentLocateUrl = "";
+    }
+    if (!el) el = matchTarget(doc, base);
+    if (el) {
+      dbgLog("定位: 图片地址匹配命中 -> " + describeEl(el));
+    }
+    if (!el) {
+      var fragEl = fragmentTarget(doc, fragUrl);
+      if (fragEl && current.imageIndex >= 0) {
+        // src 匹配不到时（站点懒加载/重渲染会改写图片地址），按推送携带的
+        // 图片序号取节点正文里的第 N 张图——序号来自下载时的文档顺序
+        var scope = fragEl;
+        try { scope = fragEl.querySelector(".reader-rich-content") || fragEl; } catch (e) { /* 保持 fragEl */ }
+        var nodeImgs = null;
+        try { nodeImgs = scope.querySelectorAll("img"); } catch (e) { nodeImgs = null; }
+        var total = nodeImgs ? nodeImgs.length : 0;
+        if (nodeImgs && nodeImgs.length > current.imageIndex) el = nodeImgs[current.imageIndex];
+        if (el) dbgLog("定位: 图片序号回退命中(第" + (current.imageIndex + 1) + "/" + total + "张) -> " + describeEl(el));
+        else dbgLog("定位: 序号回退失败(节点内共" + total + "张图, 需要第" + (current.imageIndex + 1) + "张)");
+      }
+      if (!el) { el = fragEl; viaFragment = !!el; if (el) dbgLog("定位: 片段兜底 -> " + describeEl(el)); }
+    }
+
+    if (el) {
+      beginLocate(el, viaFragment, hadImageTarget, token);
+      // 图片暂时匹配不到而退到片段兜底时（懒加载/站点重渲染中），继续尝试
+      // 升级到图片定位；目录跳章（fragmentOnly）以节点为目标，不升级
+      if (viaFragment && !fragmentOnly && hadImageTarget) {
+        armImageUpgrade(token);
+      }
+      return true;
+    }
+
+    // 片段目标暂未渲染（路书 SPA 水合/内容替换中）：短暂轮询，
+    // 期间绝不退回页首（contentScope = 节点流顶部 = 第一章节）
+    var fragId = String(fragUrl).split("#")[1] || "";
+    if (fragId) {
+      var fragTries = 0;
+      (function pollFrag() {
+        if (token !== locateToken) return;   // frame 已跳到别的页面
+        var d = frameDoc();
+        var n = d ? fragmentTarget(d, fragUrl) : null;
+        if (n) { beginLocate(n, true, hadImageTarget, token); return; }
+        if (++fragTries < 12) { setTimeout(pollFrag, 300); return; }   // ~3.5s
+        statusToast("暂未找到所选章节位置");
+      })();
+      return true;
+    }
+
+    el = contentScope(doc);
+    if (!el) { statusToast("未找到攻略正文区域"); return true; }
+    beginLocate(el, false, hadImageTarget, token);
+    return true;
+  }
+
+  // 片段兜底定位后继续重试图片匹配：路书页的图片懒加载/站点重渲染可能让
+  // 推送图片暂时不在 DOM 里；一旦出现立即升级定位到该图片（仅“回到场景”
+  // 与场景推送的兜底路径会走到这里，目录跳章不升级）
+  function armImageUpgrade(token) {
+    var tries = 0;
+    (function upgrade() {
+      if (token !== locateToken) return;   // 已有更新的定位指令
+      if (userInteracted) return;          // 用户已自行滚动：不再打扰
+      var doc = frameDoc();
+      var img = doc ? matchTarget(doc, docBase(doc)) : null;
+      if (img) {
+        var block = img.tagName === "IMG" ? "center" : "start";
+        scrollToElement(img, block);
+        lastTarget = { el: img, block: block };
+        var scene = current.title ? "「" + current.title + "」" : "当前场景";
+        statusToast("已定位到" + scene);
+        scheduleReSnap(img, block, token);
+        return;
+      }
+      if (++tries < 10) { setTimeout(upgrade, 600); }   // ~6s
+    })();
+  }
+
+  // 定位流程后半段：等目标元素有稳定高度 -> 滚动 -> 提示 -> 校正
+  function beginLocate(el, viaFragment, hadImageTarget, token) {
+    var attempts = 0;
+    var maxAttempts = 55;   // ~8s：等目标图片加载出真实高度，超时则尽力滚动
+    var prevHeight = -1;
+    (function waitReady() {
+      if (token !== locateToken) return;   // frame 已跳到别的页面
+      var isImg = el.tagName === "IMG";
+      var height = el.offsetHeight;
+      var stable = !isImg || height >= 80 || (height > 0 && height === prevHeight);
+      prevHeight = height;
+      if (!stable) {
+        attempts += 1;
+        if (attempts < maxAttempts) { setTimeout(waitReady, 150); return; }
+      }
+      var block = isImg ? "center" : "start";
+      scrollToElement(el, block);
+      lastTarget = { el: el, block: block };
+      // 提示用推送携带的章节名（section），不展示图片文件名
+      var scene = current.title ? "「" + current.title + "」" : "当前场景";
+      if (isImg || viaFragment) {
+        statusToast("已定位到" + scene);
+      } else if (hadImageTarget) {
+        statusToast("未找到目标图片，已定位" + scene + "页首");
+      } else {
+        statusToast("已定位" + scene + "页首");
+      }
+      scheduleReSnap(el, block, token);
+    })();
+  }
+
+  function scheduleReSnap(el, block, token) {
+    // 上方图片陆续加载会把目标往下推，分三次校正；用户开始操作则停止
+    [1500, 3500, 6000].forEach(function (delay) {
+      setTimeout(function () {
+        if (token !== locateToken || userInteracted || !el.isConnected) return;
+        syncFrameHeight();
+        scrollToElement(el, block);
+      }, delay);
+    });
+  }
+
+  // ------------------------------------------------------------ frame 加载
+  frame.addEventListener("load", function () {
+    showLoading(false);
+    var doc = null;
+    try { doc = frame.contentDocument; } catch (e) { doc = null; }
+    if (!doc || !doc.body) {
+      // frame 被页内 JS 跳去了跨域地址：站点劫持（非用户点击）时拉回经代理的页面；
+      // 用户自己点击外链导致的跨域则不打扰。
+      if (!userInteracted && current.url && escapeRetries <= 2) {
+        escapeRetries += 1;
+        statusToast("页面被跳转，正在拉回…");
+        setTimeout(function () { openUrl(current.url, true, { noFragmentJump: true }); }, 300);
+      } else if (!userInteracted) {
+        statusToast("页面已跳转到站外，点“回到场景”返回");
+      }
+      return;
+    }
+    escapeRetries = 0;
+    armUserGuard(doc);
+    fitScale();
+    startHeightSync();
+    if (autoLocatePending) {
+      // 仅推送驱动的加载才自动定位；用户自己点“下一页/章节”不打扰
+      autoLocatePending = false;
+      locate();
+    }
+  });
+
+  window.addEventListener("resize", function () {
+    fitScale();
+    resnap();
+  });
+
+  locateBtn.addEventListener("click", function () {
+    if (!current.url) return;
+    userInteracted = false;
+    escapeRetries = 0;
+    // 回到场景是明确的“图片级定位”指令：清掉目录跳章遗留的片段优先标记，
+    // 否则 locate() 会被降级成只定位到节点标题（章节标题处）
+    fragmentOnlyPending = false;
+    if (!frameOnTargetPage()) {
+      dbgLog("回到场景: 不在推送文档 -> 重新打开并定位");
+      // 用户已翻页离开推送页（frame 真实地址与推送页不一致）-> 重新打开并定位；
+      // noFragmentJump: 目标是图片，绝不能被目录跳章拦截滚到章节标题
+      openUrl(current.url, true, { noFragmentJump: true });
+      return;
+    }
+    var doc = frameDoc();
+    if (doc) {
+      dbgLog("回到场景: 文档内重新定位 scene=" + describeScene());
+      locate();
+    } else {
+      dbgLog("回到场景: frame 不可访问 -> 重新打开");
+      openUrl(current.url, true, { noFragmentJump: true });   // frame 被跳去了跨域页面 -> 重新经代理打开
+    }
+  });
+
+  // ------------------------------------------------------------ 下载进度
+  // 攻略下载（skill 的 download 链路或客户端自动下载）进行中时在页面上方常驻
+  // 一条进度横幅；状态来自 /api/download-status（首载拉一次）+ SSE download_progress
+  // 事件（下载进程每有进展就广播）。终态只短暂展示几秒便收起，不占版面。
+  var dlHideTimer = null;
+  var dlShowing = false;   // 本页面会话里是否展示过 running（旧终态在刚打开时不打扰）
+  var dlLastGame = "";     // 最近一次进度状态里的游戏名（重试按钮回传用）
+
+  function hideDlBanner(delayMs) {
+    if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null; }
+    dlHideTimer = setTimeout(function () {
+      dlHideTimer = null;
+      dlBanner.classList.remove("on", "done", "error", "det", "show-retry");
+      dlShowing = false;
+    }, delayMs);
+  }
+
+  function applyDownloadStatus(st) {
+    if (!st) return;
+    var status = st.status || "idle";
+    var game = st.game ? "《" + st.game + "》" : "";
+    if (st.game) { dlLastGame = st.game; }
+
+    if (status === "running") {
+      if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null; }
+      dlBanner.classList.remove("done", "error", "show-retry");
+      dlText.textContent = game + (st.stage || "正在下载攻略");
+      dlText.title = dlText.textContent + (st.detail ? "\n" + st.detail : "");
+      var pct = (typeof st.progress === "number") ? st.progress : -1;
+      if (pct >= 0) {
+        dlBanner.classList.add("det");
+        dlFill.style.width = Math.max(3, Math.min(100, pct)) + "%";
+        dlPct.textContent = Math.round(pct) + "%";
+      } else {
+        dlBanner.classList.remove("det");
+        dlFill.style.width = "";
+        dlPct.textContent = "";
+      }
+      dlDetail.textContent = st.detail || "";
+      dlDetail.title = st.detail || "";
+      dlShowing = true;
+      dlBanner.classList.add("on");
+      return;
+    }
+
+    // 页面刚打开时遇到的旧终态（很久前的下载结果）不展示
+    if (!dlShowing || (status !== "done" && status !== "error" && status !== "interrupted")) return;
+    if (status === "done") {
+      dlBanner.classList.add("done");
+      dlText.textContent = game + "攻略已就绪";
+      dlPct.textContent = "100%";
+      dlDetail.textContent = "";
+      dlDetail.title = "";
+      dlBanner.classList.remove("show-retry");
+      hideDlBanner(6000);
+    } else {
+      // 失败：横幅常驻不自动收起（重试按钮需要一直在），直到重试开始/页面刷新
+      dlBanner.classList.add("error", "show-retry");
+      dlText.textContent = game + (st.stage || "攻略下载失败");
+      dlPct.textContent = "";
+      dlDetail.textContent = (st.detail || "") + (status === "interrupted" ? "（下载进程失去响应）" : "");
+      dlDetail.title = dlDetail.textContent;
+      dlBanner.classList.add("on");
+      dlShowing = true;
+    }
+  }
+
+  // 失败横幅上的“重试”按钮：webserver 转给客户端，从失败处继续下载/导入
+  dlRetry.addEventListener("click", function () {
+    if (dlRetry.disabled) return;
+    dlRetry.disabled = true;
+    dlRetry.textContent = "重试中…";
+    fetch("/api/download-retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game: dlLastGame })
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: resp.ok, status: resp.status, data: data };
+      });
+    }).then(function (res) {
+      if (!res.ok || !res.data || !res.data.ok) {
+        throw new Error((res.data && (res.data.error || res.data.message)) || ("HTTP " + res.status));
+      }
+      // 已受理：横幅保持常驻，等待 SSE 的 running 进度接管
+      if (dlHideTimer) { clearTimeout(dlHideTimer); dlHideTimer = null; }
+      dlBanner.classList.remove("done", "error", "show-retry");
+      dlBanner.classList.add("on");
+      dlText.textContent = (dlLastGame ? "《" + dlLastGame + "》" : "") + "正在重新下载（从失败处继续）…";
+      dlPct.textContent = "";
+      dlDetail.textContent = "";
+      dlShowing = true;
+    }).catch(function (exc) {
+      dlDetail.textContent = "重试失败: " + exc.message;
+      dlDetail.title = dlDetail.textContent;
+    }).then(function () {
+      dlRetry.disabled = false;
+      dlRetry.textContent = "重试";
+    });
+  });
+
+  function refreshDownloadStatus() {
+    fetch("/api/download-status", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(applyDownloadStatus)
+      .catch(function () { /* webserver 重启中，SSE 重连后再试 */ });
+  }
+
+  // ------------------------------------------------------------ 推送订阅
+  function refreshView() {
+    fetch("/api/view", { cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (view) {
+        if (!view) return;
+        current.game = view.game || "";
+        if (view.title) { current.title = view.title; }
+        if (view.url) {
+          applyTarget(view);
+        } else {
+          emptyBox.style.display = "flex";
+        }
+      })
+      .catch(function () { /* webserver 重启中，等 SSE 重连后再试 */ });
+  }
+
+  function subscribe() {
+    var es = new EventSource("/api/events");
+    es.onopen = refreshDownloadStatus;   // 重连后补拉一次，避免漏掉断线期间的进度变化
+    es.onmessage = function (msg) {
+      try {
+        var ev = JSON.parse(msg.data);
+        if (ev && ev.type === "navigate") applyTarget(ev);
+        else if (ev && ev.type === "download_progress") applyDownloadStatus(ev);
+      } catch (e) { /* ignore malformed event */ }
+    };
+    es.onerror = function () { /* EventSource 自动重连 */ };
+  }
+
+  // ------------------------------------------------------------ 底部导航栏
+  var tocData = null;        // [{name, url}]，来自 /api/toc（文章内容导航）
+  var tocLoadedFor = "";     // 目录对应的文档标识（docKey）：换游戏/换文章后自动重载
+  var tocLoading = false;
+
+  function articleInfo(url) {
+    var m = String(url || "").match(/(\d{5,})(?:_(\d+))?\.(?:s?html|html)/i);
+    return m ? { id: m[1], page: parseInt(m[2] || "1", 10) } : null;
+  }
+  function siblingUrl(url, page) {
+    var m = String(url || "").match(/^(.*\d{5,})(?:_(\d+))?(\.(?:s?html|html))([?#].*)?$/i);
+    if (!m) return null;
+    return m[1] + (page > 1 ? "_" + page : "") + m[3] + (m[5] || "");
+  }
+  function navigate(delta) {
+    var base = loadedUrl || current.url;   // frame 实际展示的页面优先
+    // 新版路书页没有“页”：上一页/下一页 = 上一段/下一段文本（节点卡）
+    if (ROADBOOK_URL_RE.test(base)) { navigateRoadbook(base, delta); return; }
+    var info = articleInfo(base);
+    if (!info) { statusToast("当前页面不支持翻页"); return; }
+    var target = info.page + delta;
+    if (target < 1) { statusToast("已经是第一页"); return; }
+    if (tocData && target > tocData.length) { statusToast("已经是最后一页"); return; }
+    var url = siblingUrl(base, target);
+    if (url) {
+      openUrl(url, false);   // 手动翻页：不触发场景定位
+    } else {
+      statusToast("无法计算翻页地址");
+    }
+  }
+
+  // 路书页翻段：以当前定位位置（lastTarget）为基准，滚到上一个/下一个节点卡
+  function navigateRoadbook(base, delta) {
+    var doc = frameDoc();
+    var nodes = null;
+    try { nodes = doc ? doc.querySelectorAll("article.reader-node-card") : null; } catch (e) { nodes = null; }
+    if (!nodes || !nodes.length) { statusToast("当前页面不支持翻段"); return; }
+    // 作废未完成的定位/校正：否则上一场景的 scheduleReSnap 会在 1.5~6s 后
+    // 把页面拽回上一次定位的位置（“翻到下一章又被弹回第一章”的原因）
+    locateToken += 1;
+    userInteracted = false;
+
+    var idx = -1;
+    if (lastTarget && lastTarget.el) {
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i] === lastTarget.el) { idx = i; break; }
+      }
+      if (idx < 0) {
+        // 定位基准是节点内的图片等元素：按文档位置归入所在节点
+        // （同一滚动状态下 getBoundingClientRect 的 top 保持文档顺序）
+        try {
+          var refTop = lastTarget.el.getBoundingClientRect().top;
+          for (var k = 0; k < nodes.length; k++) {
+            if (nodes[k].getBoundingClientRect().top <= refTop) idx = k;
+          }
+        } catch (e) { idx = -1; }
+      }
+    }
+    if (idx < 0) {
+      // 没有定位基准（如刚打开还没定位过）：按当前视口位置找所在节点
+      var vh = (doc.defaultView && doc.defaultView.innerHeight) || 800;
+      for (var j = 0; j < nodes.length; j++) {
+        try {
+          if (nodes[j].getBoundingClientRect().top <= vh * 0.4) idx = j;   // 取最后一个越过视口上部的
+        } catch (e) { /* 忽略单个节点的测量失败 */ }
+      }
+      if (idx < 0) idx = 0;
+    }
+
+    var next = idx + delta;
+    if (next < 0) { statusToast("已经是第一章节"); return; }
+    if (next >= nodes.length) { statusToast("已经是最后一章节"); return; }
+    var el = nodes[next];
+    scrollToRoadbookNode(el);
+    // 地址片段与目录选中项跟着翻段走
+    var id = "";
+    try { id = el.id || ""; } catch (e) { id = ""; }
+    if (id) {
+      loadedUrl = String(base).split("#")[0] + "#" + id;
+      syncTocSelection();
+    }
+  }
+
+  // 目录下拉只放目录本身，保持攻略页“文章内容导航”的原有顺序，没有伪首项。
+  // 当前页对应的目录项会被选中（selectedIndex）：
+  //   - 收起时它就是下拉框的显示文本；
+  //   - 展开时浏览器自动把弹出列表滚动到选中项——即“自动滚到当前章节”。
+  // 当前页不在目录里（目录未加载/非文章页）时 selectedIndex = -1，显示为空。
+  function syncTocSelection() {
+    if (!tocData) return;
+    var key = pageKey(loadedUrl || current.url);
+    var idx = -1;
+    for (var i = 0; i < tocData.length; i++) {
+      if (pageKey(tocData[i].url) === key) { idx = i; break; }
+    }
+    tocSelect.selectedIndex = idx;
+  }
+
+  function loadToc() {
+    var base = current.url || loadedUrl;   // 优先推送的 PC 版地址（目录完整）
+    if (!base) return;
+    var key = docKey(base);
+    if (tocLoading) return;
+    if (tocData && tocLoadedFor === key) return;   // 同一文档：沿用已加载的目录
+    // 文档变了（切换游戏/切换文章）：立即清掉旧目录再拉取，
+    // 否则切换游戏后下拉里残留上一个游戏的章节列表
+    tocData = null;
+    tocSelect.options.length = 0;
+    tocSelect.selectedIndex = -1;
+    tocLoading = true;
+    fetch("/api/toc?url=" + encodeURIComponent(base))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        tocLoading = false;
+        // 响应返回时目标文档可能又变了（快速切换游戏）：丢弃过期响应
+        var wantKey = docKey(current.url || loadedUrl || "");
+        if (wantKey && wantKey !== key) return;
+        if (!data || !data.ok || !data.toc || !data.toc.length) { statusToast("目录不可用"); return; }
+        tocData = data.toc;
+        tocLoadedFor = key;
+        tocSelect.options.length = 0;
+        tocData.forEach(function (item) {
+          tocSelect.add(new Option(item.name || item.url, item.url));
+        });
+        syncTocSelection();
+      })
+      .catch(function () { tocLoading = false; statusToast("目录加载失败"); });
+  }
+  loadToc();   // 页面加载时即获取目录，点击下拉直接展示
+  document.getElementById("prevBtn").addEventListener("click", function () { navigate(-1); });
+  document.getElementById("nextBtn").addEventListener("click", function () { navigate(1); });
+  function onTocOpen() {
+    loadToc();
+    syncTocSelection();   // 展开瞬间把选中项对齐当前页，弹出列表随之滚过去
+  }
+  tocSelect.addEventListener("mousedown", onTocOpen);
+  tocSelect.addEventListener("focus", onTocOpen);
+  tocSelect.addEventListener("change", function () {
+    var url = tocSelect.value;
+    if (url) openUrl(url, false);   // 手动跳章：不触发场景定位；选中项留在所选章节
+  });
+
+  refreshView();
+  refreshDownloadStatus();
+  subscribe();
+})();
+</script>
+</body>
+</html>

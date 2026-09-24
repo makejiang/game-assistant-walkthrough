@@ -1,0 +1,26 @@
+{
+  "author": "Intel",
+  "author_icon": "https://static.marvis.qq.com/wupload/skill-author-icons/1787810233083_%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260513193618_11_2159.jpg?imageMogr2/thumbnail/48x/format/webp",
+  "description": "\"启动游戏攻略助手与下载攻略流程。用于用户说'我要玩游戏了'、'我要玩XXX游戏了'、'打开攻略'、'打开XXX攻略'、'开始游戏'、'启动攻略助手'、'下载攻略'、'下载XXX攻略'、'更新攻略'等场景：先判断用户意图；若是下载攻略，仅下载并导入，不启动 game_client.py；若是打开攻略且原话明确带游戏名（如'打开XXX攻略'、'我要玩XXX游戏了'），通过 service_manager.py launch 启动（含 PID 防重复）；否则按原流程检测游戏后再启动。\"",
+  "detail_describe": "自动部署GameAssistantToolServer\n检测当前游戏进程（基于 GPU Engine 使用率）\n自动下载并整理图文攻略（当前实现基于游民星空页面解析）\n将攻略导入游戏助手服务\n启动桌面攻略客户端浮层，支持手机扫码打开默认浏览器查看攻略[鼠标移至屏幕右上角，同局域网手机扫码即可在浏览器中查看攻略]\n并支持按游戏名直启下载、打开攻略",
+  "display_description": "一键下载指定游戏攻略，构建本地知识库，实时识别游戏画面，显示对应攻略内容。",
+  "display_name": "AI游戏路书",
+  "download_count": 0,
+  "download_url": "https://down.marvis.qq.com/wupload2/skill-packages/1787810146509_skill-game-assistant-walkthrough-1.0.1-20260824-104332.zip",
+  "icon": "https://static.marvis.qq.com/wupload/skill-icons/1787810205255_%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260822113455_295_82.jpg?imageMogr2/thumbnail/224x/format/webp",
+  "id": 576,
+  "is_downloaded": false,
+  "last_modified_time": "2026-08-27 14:05:59",
+  "md5": "949790748a5cd821252046ee8390c9f9",
+  "name": "game-assistant-walkthrough",
+  "scope": [
+    "main"
+  ],
+  "type": "英特尔用户专区",
+  "use_cases": [
+    "我要玩《黑神话：悟空》了，帮我打开全收集攻略",
+    "启动识质存在攻略",
+    "更新明末渊虚之羽攻略并启动攻略服务"
+  ],
+  "version": "2.0.1"
+}
