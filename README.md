@@ -174,3 +174,9 @@ game-assistant-walkthrough
 ### 9.5 后台任务状态异常
 
 后台任务的状态文件位于 `%LOCALAPPDATA%\GameAssistant\task_status.json`，每次新任务启动时会自动清理。如果状态一直不正常，可直接删除该文件后重试。
+
+## License
+
+This Skill is licensed under the MIT License. The complete license text is included in [LICENSE](LICENSE).
+
+SPDX-License-Identifier: MIT

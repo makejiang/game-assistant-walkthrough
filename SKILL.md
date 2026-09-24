@@ -237,3 +237,9 @@ python ./scripts/service_manager.py launch
 
 ### 模糊退出意图的处理
 当用户表达模糊的退出意图（如"不玩了""退出""关掉""结束"等，但不包含"服务"关键词）→ 不命中任何意图分支，此时提示用户："如果需要关闭后台服务，请说'关闭服务'或'关掉服务'"。
+
+## License
+
+This Skill is licensed under the MIT License. The complete license text is included in [LICENSE](LICENSE).
+
+SPDX-License-Identifier: MIT
