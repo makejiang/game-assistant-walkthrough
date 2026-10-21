@@ -9,9 +9,6 @@
   "download_url": "https://down.marvis.qq.com/wupload2/skill-packages/1787810146509_skill-game-assistant-walkthrough-1.0.1-20260824-104332.zip",
   "icon": "https://static.marvis.qq.com/wupload/skill-icons/1787810205255_%E5%BE%AE%E4%BF%A1%E5%9B%BE%E7%89%87_20260822113455_295_82.jpg?imageMogr2/thumbnail/224x/format/webp",
   "id": 576,
-  "is_downloaded": false,
-  "last_modified_time": "2026-08-27 14:05:59",
-  "md5": "949790748a5cd821252046ee8390c9f9",
   "name": "game-assistant-walkthrough",
   "scope": [
     "main"
@@ -22,5 +19,5 @@
     "启动识质存在攻略",
     "更新明末渊虚之羽攻略并启动攻略服务"
   ],
-  "version": "2.0.1"
+  "version": "2.0.2"
 }

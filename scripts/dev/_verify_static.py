@@ -17,11 +17,11 @@ def check(name, cond):
 # ── _filename_from_url ──
 check("filename 新直链取 basename",
       deploy._filename_from_url(
-          "https://modelscope.cn/api/v1/models/OpenVINO/GameAssist/repo?Revision=master"
+          "https://modelscope.cn/api/v1/models/Intel_AI_Gaming_Assistant/IntelAIGamingAssistantLibrary/repo?Revision=master"
           "&FilePath=bin%2Fwindows%2FGameAssistantToolServer.7z")
       == "GameAssistantToolServer.7z")
-check("filename 旧 zip 不变",
-      deploy._filename_from_url(deploy.SERVICE_URL) == "GameAssistant.zip")
+check("filename SERVICE_URL 取 basename",
+      deploy._filename_from_url(deploy.SERVICE_URL) == "GameAssistantToolServer.7z")
 check("filename GitHub 直链",
       deploy._filename_from_url(
           "https://github.com/x/y/releases/download/v1.1.1/GameAssistantToolServer.7z")

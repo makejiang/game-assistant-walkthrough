@@ -44,12 +44,15 @@ from dataclasses import dataclass, field, replace as dc_replace
 # ============================================================================
 
 SERVICE_URL = (
-    "https://modelscope.cn/api/v1/models/OpenVINO/GameAssist/"
-    "repo?Revision=master&FilePath=GameAssistant.zip"
+    "https://modelscope.cn/api/v1/models/Intel_AI_Gaming_Assistant/"
+    "IntelAIGamingAssistantLibrary/"
+    "repo?Revision=master&FilePath=bin%2Fwindows%2FGameAssistantToolServer.7z"
 )
 # ModelScope 仓康新布局（服务端 7z 直链，不再套 zip、无版本子目录）。
 # 旧布局 bin/vX.Y.Z/windows/... 由 SERVICE_7Z_LEGACY_RE 识别，不写死版本号。
-REPO_ID = "OpenVINO/GameAssist"
+# 2026-10：仓库由 OpenVINO/GameAssist 迁移至 Intel_AI_Gaming_Assistant/
+# IntelAIGamingAssistantLibrary（API 结构不变，仅换 REPO_ID；旧仓 bin/ 已删）。
+REPO_ID = "Intel_AI_Gaming_Assistant/IntelAIGamingAssistantLibrary"
 SERVICE_7Z_NEW = "bin/windows/GameAssistantToolServer.7z"
 INNER_7Z_NAME = "GameAssistantToolServer.7z"
 SERVICE_7Z_LEGACY_RE = re.compile(

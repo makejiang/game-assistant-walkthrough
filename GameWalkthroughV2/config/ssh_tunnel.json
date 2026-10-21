@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "host": "",
+  "port": 22,
+  "user": "",
+  "identity_file": "",
+  "private_key": "",
+  "remote_port": 18180,
+  "public_host": "",
+  "remote_bind": "0.0.0.0",
+  "local_host": "127.0.0.1",
+  "keepalive_seconds": 30,
+  "connect_timeout_seconds": 5.0,
+  "retry_seconds": 30.0,
+  "ssh_executable": "ssh"
+}
