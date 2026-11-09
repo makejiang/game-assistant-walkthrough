@@ -74,6 +74,13 @@ try:
 except ImportError:
     ImageGrab = None
 
+# ── 打开路径的线上更新检查（新鲜度）────────────────────────────────
+# 总开关：False = 完全关闭检查，行为退回改动前（上线应急用）
+OPEN_UPDATE_CHECK_ENABLED = True
+# 单次检查的网络超时（秒）；检查在后台线程，失败静默，绝不阻塞打开。
+# 触发时机 = 每次检测到游戏（_notify_game_detected，会话级低频事件），无需额外节流。
+OPEN_UPDATE_CHECK_TIMEOUT = 20
+
 
 class GameWalkthroughApp:
     REBUILD_COOLDOWN_SECONDS = 120.0  # 实例重建失败后的最小重试间隔
@@ -830,6 +837,147 @@ class GameWalkthroughApp:
             return False
         return not payload.get("finished")
 
+    def _check_local_integrity(self, game_name: str) -> None:
+        """打开路径的本地完整性自愈（后台线程调用，绝不抛出、绝不阻塞打开）。
+
+        下载线的文件完整性校验只在下载器真正运行时逐页执行；已就绪实例的
+        打开/下载命令不会启动下载器，此处补上打开路径：逐记录核对引用的
+        本地图片文件，缺失的按原路径定向补齐（与下载线同款日志，便于核对）。
+        全程持有下载锁执行，避免与正在进行的下载并发写同一批文件；锁被占用
+        时跳过本轮（下载线自身会做完整性校验，不会漏检）。
+        """
+        game_dir = self.config.walkthrough_dir / safe_game_dir_name(game_name)
+        images_json = game_dir / "images.json"
+        if not images_json.exists():
+            return
+        try:
+            payload = json.loads(images_json.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            return
+        pages = payload.get("pages") if isinstance(payload, dict) else None
+        if not isinstance(pages, list) or not pages:
+            return
+        try:
+            downloader = GamerskyWalkthroughDownloader(
+                base_output_dir=self.config.walkthrough_dir,
+                timeout=20,
+            )
+            repaired_total = 0
+            with downloader._game_download_lock(game_dir, game_name):
+                for page in pages:
+                    if not isinstance(page, dict):
+                        continue
+                    url = str(page.get("url") or "").strip()
+                    if not url or downloader._page_images_intact(payload, url):
+                        continue
+                    repaired = downloader._repair_missing_page_images(page)
+                    if repaired:
+                        repaired_total += repaired
+                        self._log_message(
+                            f"[integrity] 完整性自愈: 第{page.get('page_index')}页补齐 "
+                            f"{repaired} 张缺失图片（原路径写回）"
+                        )
+            if repaired_total:
+                self._log_message(
+                    f"[integrity] 本地完整性检查完成: 补齐 {repaired_total} 张缺失图片: {game_name}"
+                )
+        except RuntimeError as exc:
+            # 下载锁被占用 = 已有下载在进行，下载线自身会做完整性校验
+            self._log_message(f"[integrity] 已有下载在进行，本轮跳过本地完整性检查 ({exc})")
+        except Exception as exc:
+            self._log_message(f"[integrity] 检查失败，按现状打开: {game_name} ({exc})")
+
+    def _check_online_update(self, game_name: str) -> None:
+        """打开路径的新鲜度检查（后台线程调用，绝不抛出、绝不阻塞打开）。
+
+        每次检测到游戏（会话级低频事件）时执行一次：拉一次线上路书页，
+        与本地 images.json 比对，使本地展示与线上保持一致——
+          - missing（线上有、本地无）：清理 state 后走现有增量回填；
+          - changed（URL 同、标题变）：清理 state 与页记录，回填重下后定向
+            force_reimport 先删旧场景再插新场景；
+          - pruned（本地有、线上无）：清理本地记录后删除服务端对应场景，
+            展示随线上下架（prune_missing=True 的定向删除，范围=差集）；
+          - 解析失败/线上为空 = 无法判断，一律跳过，绝不误删；
+          - 旧版 Mid2L_con 攻略解析不出路书节点，本检查自动成为 no-op。
+        """
+        if not OPEN_UPDATE_CHECK_ENABLED:
+            return
+        self._log_message("[update-check] 开始检查线上更新")
+        game_dir = self.config.walkthrough_dir / safe_game_dir_name(game_name)
+        images_json = game_dir / "images.json"
+        state_file = game_dir / "download_images_state.json"
+        try:
+            payload = json.loads(images_json.read_text(encoding="utf-8"))
+            base_url = str(payload.get("base_url") or "").strip()
+            if not base_url or not (payload.get("pages") or []):
+                self._log_message(
+                    f"[update-check] 本地数据缺少 base_url 或页记录，跳过 "
+                    f"(base_url={'有' if base_url else '无'}, 本地页数={len(payload.get('pages') or [])})"
+                )
+                return
+            online_titles = GamerskyWalkthroughDownloader.fetch_roadbook_titles(
+                base_url, timeout=OPEN_UPDATE_CHECK_TIMEOUT
+            )
+            probe_kind = "新版路书"
+            if not online_titles:
+                # 旧版文章（无路书节点）：改按分页页标题探测
+                online_titles = GamerskyWalkthroughDownloader.fetch_old_format_titles(
+                    base_url, timeout=OPEN_UPDATE_CHECK_TIMEOUT
+                )
+                probe_kind = "旧版文章"
+            if not online_titles:      # 两种形态都解析不出 = 无法判断，绝不 prune
+                self._log_message("[update-check] 线上页面解析为空（旧版或结构变化），无法判断，本次跳过")
+                return
+            missing, changed, pruned = GamerskyWalkthroughDownloader.diff_pages(
+                payload, online_titles
+            )
+            self._log_message(
+                f"[update-check] 比对完成({probe_kind}): 线上{len(online_titles)}页, 本地{len(payload.get('pages') or [])}页, "
+                f"新增{len(missing)}, 标题变化{len(changed)}, 下架{len(pruned)}"
+            )
+            if not missing and not changed and not pruned:
+                return
+            self._log_message(
+                f"[update-check] 线上有变化: 新增{len(missing)}页, "
+                f"标题变化{len(changed)}页, 线上下架{len(pruned)}页: {game_name}"
+            )
+            stale = missing | changed | pruned
+            GamerskyWalkthroughDownloader.remove_downloaded_pages(state_file, stale)
+            removed = changed | pruned
+            if removed:
+                # 删记录前先收集待清理页的图片 src：标题变化/下架页重下前必须
+                # 清缓存条目，否则下载器按缓存复用旧文件（“标题新、图旧”），
+                # 补全下载拿不到网站新图
+                stale_srcs: set[str] = set()
+                for page in payload.get("pages", []):
+                    if not isinstance(page, dict):
+                        continue
+                    if str(page.get("url") or "").strip() in removed:
+                        for image in page.get("images") or []:
+                            if isinstance(image, dict):
+                                src = str(image.get("src") or "").strip()
+                                if src:
+                                    stale_srcs.add(src)
+                GamerskyWalkthroughDownloader.remove_image_pages(images_json, removed)
+                GamerskyWalkthroughDownloader.remove_image_cache_entries(state_file, stale_srcs)
+            if pruned:
+                # 删除服务端已下架场景并重建 scene_map（此时本地记录已清理，
+                # 差集恰好等于下架页）
+                self._get_vision_client().sync_images_from_json(
+                    instance_id=game_name,
+                    images_json_path=images_json,
+                    prune_missing=True,
+                )
+            if missing or changed:
+                threading.Thread(
+                    target=self._bootstrap_job,
+                    args=(game_name, changed),
+                    name=f"bootstrap-update-{game_name}",
+                    daemon=True,
+                ).start()
+        except Exception as exc:
+            self._log_message(f"[update-check] 检查失败，按现状打开: {game_name} ({exc})")
+
     def _ensure_bootstrap(self, game_name: str) -> None:
         if not self.config.auto_bootstrap:
             return
@@ -839,6 +987,23 @@ class GameWalkthroughApp:
         # 已生成、识别可用），剩余页面也要继续下载+导入
         partial = self._is_partial_download(game_name)
         if self._is_instance_ready(game_name) and not partial:
+            # 就绪后做一次线上新鲜度检查：后台线程执行，发现线上新增/标题
+            # 变化/已下架的页面时对齐；任何失败静默，不影响本次打开
+            threading.Thread(
+                target=self._check_online_update,
+                args=(game_name,),
+                name=f"update-check-{game_name}",
+                daemon=True,
+            ).start()
+            # 本地完整性自愈：下载线的文件校验只在下载器真正运行时逐页执行，
+            # 已就绪实例的打开/下载命令不会启动下载器——打开路径在此补上
+            # 缺失检测与补齐（CHANGELOG 承诺“打开或下载攻略会自动检测”）
+            threading.Thread(
+                target=self._check_local_integrity,
+                args=(game_name,),
+                name=f"integrity-{game_name}",
+                daemon=True,
+            ).start()
             return
         with self._bootstrap_lock:
             if game_name in self._bootstrapping:
@@ -866,7 +1031,9 @@ class GameWalkthroughApp:
             job, name = self._bootstrap_job, f"bootstrap-{game_name}"
         threading.Thread(target=job, args=(game_name,), name=name, daemon=True).start()
 
-    def _bootstrap_job(self, game_name: str) -> None:
+    def _bootstrap_job(
+        self, game_name: str, force_import_urls: set[str] = frozenset()
+    ) -> None:
         # 进度上报到共享状态文件，内嵌 webserver 轮询到变化后推给打开的攻略页面。
         # 增量模式：每下载完一页立即 插入+构建，玩家从第一页起就能开始识别，
         # 后续页面在后台继续边下边导入（进度按已完成的页数单调推进）。
@@ -881,15 +1048,32 @@ class GameWalkthroughApp:
             images_json = self.config.walkthrough_dir / safe_game_dir_name(game_name) / "images.json"
             importer = self._get_vision_client()
             imported_pages = {"count": 0}
+            # 标题变化页先累积、下载收尾后一次性批量定向重导：全量构建是
+            # 该游戏全部场景的索引重建，逐页触发意味着 N 页变化 = N 次全量
+            # 构建，非常耗时；批量后 N 页变化只构建 1 次
+            force_records: list[dict[str, Any]] = []
 
             def import_page(page_record: dict[str, Any]) -> None:
                 """页面下载完成回调（images.json 已落盘）：插入新场景并构建。"""
-                result = importer.sync_images_from_json(
-                    instance_id=game_name,
-                    images_json_path=images_json,
-                    force_reimport=False,
-                    progress_callback=reporter.update_from_line,
-                )
+                if not page_record.get("images"):
+                    # 无图节点（如纯文字概述）没有可导入的场景：若此时 images.json 里
+                    # 还没有任何带图页，导入器会因“无可用图片条目”抛错并中止整次下载。
+                    # 跳过即可——首页就绪顺延到第一个有图的页；收尾还有一次全量同步兜底
+                    self._log_message(
+                        f"[bootstrap] 第{page_record.get('page_index')}页无图，跳过增量导入: {game_name}"
+                    )
+                    return
+                if page_record.get("url") in force_import_urls:
+                    # 标题变化页：本轮只累积记录，下载收尾后批量定向重导
+                    # （见 download_images_only 之后的批量 sync）
+                    force_records.append(page_record)
+                else:
+                    result = importer.sync_images_from_json(
+                        instance_id=game_name,
+                        images_json_path=images_json,
+                        force_reimport=False,
+                        progress_callback=reporter.update_from_line,
+                    )
                 imported_pages["count"] += 1
                 if imported_pages["count"] == 1:
                     # 首页就绪即放开识别并导航到攻略位置，不等剩余页面
@@ -901,6 +1085,35 @@ class GameWalkthroughApp:
                 )
 
             payload = downloader.download_images_only(game_name, on_page=import_page)
+            if force_records:
+                # 批量定向重导：全部标题变化页一次"先删后插" + 1 次全量构建。
+                # force_reimport 的删除范围是"本次导入集合里服务端已存在的
+                # 场景"（导入器原生语义），借此只替换变化页、不动其它页。
+                # 临时 json 放独立子目录，避免导入器把正式 scene_map.json 冲掉。
+                temp_dir = images_json.parent / "_update_tmp"
+                temp_dir.mkdir(exist_ok=True)
+                temp_json = temp_dir / "force_page.json"
+                temp_json.write_text(
+                    json.dumps(
+                        {"game": game_name, "pages": force_records},
+                        ensure_ascii=False,
+                        indent=4,
+                    ),
+                    encoding="utf-8",
+                )
+                try:
+                    importer.sync_images_from_json(
+                        instance_id=game_name,
+                        images_json_path=temp_json,
+                        force_reimport=True,
+                        progress_callback=reporter.update_from_line,
+                    )
+                finally:
+                    temp_json.unlink(missing_ok=True)
+                self._log_message(
+                    f"[bootstrap] 标题变化批量重导完成 game={game_name} "
+                    f"pages={len(force_records)}（1 次全量构建）"
+                )
             # 收尾兜底：再同步一次（续传场景下无新页时也能建立索引/恢复导航）
             result = importer.sync_images_from_json(
                 instance_id=game_name,

@@ -512,6 +512,11 @@ class WalkthroughServiceImporter:
         return set(payload_data.get("data", {}).get("scenes_id", []))
 
     def _delete_vision_scenes(self, instance_id: str, scene_ids: list[str]) -> int:
+        if scene_ids:
+            _logger.info(
+                f"删除服务端场景: instance={instance_id} 共 {len(scene_ids)} 个"
+                f"（首个 scene_id={scene_ids[0][:16]}…）"
+            )
         deleted_count = 0
         for scene_id in scene_ids:
             self._post_json(f"{self._base_url}/vision/scene/delete/{instance_id}/{scene_id}")
@@ -586,6 +591,7 @@ class WalkthroughServiceImporter:
         images_json_path: str | Path,
         *,
         force_reimport: bool = False,
+        prune_missing: bool = False,
         verbose: bool = False,
         progress_callback: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
@@ -612,7 +618,8 @@ class WalkthroughServiceImporter:
         try:
             return self._sync_images_locked(
                 instance_id, json_path, game_name, entries, scene_map_path,
-                force_reimport=force_reimport, verbose=verbose, progress_callback=progress_callback,
+                force_reimport=force_reimport, prune_missing=prune_missing,
+                verbose=verbose, progress_callback=progress_callback,
             )
         except Exception as exc:
             _logger.error(f"导入 vision 场景失败: instance={instance_id} game={game_name} 错误={exc}")
@@ -627,6 +634,7 @@ class WalkthroughServiceImporter:
         scene_map_path: Path,
         *,
         force_reimport: bool,
+        prune_missing: bool = False,
         verbose: bool,
         progress_callback: Callable[[str], None] | None,
     ) -> dict[str, Any]:
@@ -639,6 +647,18 @@ class WalkthroughServiceImporter:
             if to_delete:
                 self._delete_vision_scenes(instance_id, to_delete)
             existing_scene_ids = set()
+
+        pruned_scene_count = 0
+        if prune_missing and existing_scene_ids:
+            # 与线上保持一致：删除“服务端已有、本地 json 已不存在”的场景。
+            # 必须在本地页记录清理之后调用——差集之外的 scene 一律视为已下架。
+            current_ids = {entry.scene_id for entry in entries}
+            stale_scene_ids = [
+                sid for sid in existing_scene_ids if sid not in current_ids
+            ]
+            if stale_scene_ids:
+                pruned_scene_count = self._delete_vision_scenes(instance_id, stale_scene_ids)
+                existing_scene_ids -= set(stale_scene_ids)
 
         inserted_count = 0
         skipped_count = 0
@@ -685,6 +705,7 @@ class WalkthroughServiceImporter:
         summary = {
             "instance_id": instance_id,
             "game": game_name,
+            "scenes_pruned": pruned_scene_count,
             "source_json": _display_path(json_path),
             "scene_map_file": _display_path(scene_map_path),
             "scenes_total": len(entries),
@@ -1170,6 +1191,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Delete existing matching records before import.",
     )
     parser.add_argument(
+        "--prune-missing",
+        action="store_true",
+        help="Delete server scenes that no longer exist in the local json (site-delisted pages).",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=30.0,
@@ -1212,6 +1238,7 @@ def main(argv: list[str] | None = None) -> int:
                 instance_id=args.instance_id,
                 images_json_path=json_path,
                 force_reimport=args.force_reimport,
+                prune_missing=args.prune_missing,
                 verbose=args.verbose,
             )
         except Exception as exc:

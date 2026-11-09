@@ -2,7 +2,6 @@
 """
 Game Assistant Tool Server — 一键部署脚本
 ===========================================
-参考: IntelAIGamingAssistantLibrary/demo/dowload_models/download_modelscope_models.py
 
 功能：服务包获取 → 解压安装 → AI 模型下载 → 启动服务 → 健康检查
 监听地址：127.0.0.1:22919（新版默认；不通时兼容探测旧版 9190）
@@ -306,37 +305,9 @@ def _acquire_single_instance_lock(install_dir: Path):
         f.close()
         return None
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 模型配置 — 来源:
-#   https://github.com/GameTechDev/IntelAIGamingAssistantLibrary/blob/main/
-#   demo/dowload_models/download_modelscope_models.py
-#
-# COMMON_MODELS: 8 类通用模型
-# SPLITTER_MODELS: 分词模型（按语言区分，默认 zh）
-# ═══════════════════════════════════════════════════════════════════════════
-_COMMON = {
-    "LLM":       ("DeviLeo/Qwen3-4B-int4-ov",
-                   ["models", "llm"]),
-    "Embedding": ("DeviLeo/bge-m3-int4-sym-ov",
-                   ["models", "emb"]),
-    "Rerank":    ("DeviLeo/bge-reranker-v2-m3-int4-sym-ov",
-                   ["models", "rerank"]),
-    "MMR":       ("DeviLeo/gme-Qwen2-VL-2B-Instruct-int4-sym-ov",
-                   ["models", "mmr", "gme"]),
-    "ASR":       ("DeviLeo/FunASR-ov",
-                   ["models", "asr"]),
-    "OCR":       ("DeviLeo/PaddleOCR-ov",
-                   ["models", "ocr"]),
-    "Action":    ("DeviLeo/BossActionRecognition",
-                   ["models", "bar"]),
-    "VLM":       ("DeviLeo/Qwen3.5-4B-int4-ov",
-                   ["models", "vlm"]),
-}
-
-_SPLITTERS = {
-    "zh": ("DeviLeo/zh_core_web_sm-3.8.0", ["models", "splitter"]),
-    "en": ("DeviLeo/en_core_web_sm-3.8.0", ["models", "splitter"]),
-}
+# 本项目不下载任何模型：内置模型表留空（保持 build_models_config 等接口不变）
+_COMMON: dict = {}
+_SPLITTERS: dict = {}
 
 # 重试参数
 MAX_RETRIES = 6
@@ -355,15 +326,15 @@ STATE_FILE = ".deploy_state.json"
 
 def build_models_config(lang: str = "zh") -> dict:
     """组装完整的模型配置字典。"""
-    if lang not in _SPLITTERS:
-        raise ValueError(f"不支持的语言: {lang}，可选: {list(_SPLITTERS.keys())}")
-
     models = {}
     for name, (model_id, dir_parts) in _COMMON.items():
         models[name] = {"model_id": model_id, "dir": Path(*dir_parts)}
 
-    splitter_id, splitter_dirs = _SPLITTERS[lang]
-    models["Splitter"] = {"model_id": splitter_id, "dir": Path(*splitter_dirs)}
+    if _SPLITTERS:
+        if lang not in _SPLITTERS:
+            raise ValueError(f"不支持的语言: {lang}，可选: {list(_SPLITTERS.keys())}")
+        splitter_id, splitter_dirs = _SPLITTERS[lang]
+        models["Splitter"] = {"model_id": splitter_id, "dir": Path(*splitter_dirs)}
 
     return models
 
@@ -2418,7 +2389,7 @@ class Deployer:
         self.mode = mode
         self.package_path = package_path
         self.lang = lang
-        self.skip_models = skip_models
+        self.skip_models = True  # 本项目不下载任何模型，忽略命令行传入值
         self.only_models = only_models
         self.start_only = start_only
         self.force = force
@@ -2781,14 +2752,16 @@ class Deployer:
         plan = UpdatePlan(service=service)
 
         # 模型清单：下载远端脚本 ast 解析，失败三级降级（上次缓存 → 内置）
-        models_config, script_sha, parsed_ok, manifest_norm = \
-            self._fetch_manifest(root_files)
-        plan.script_sha256 = script_sha or ""
-        plan.manifest_normalized = manifest_norm if parsed_ok else {}
-        self._manifest_models_config = models_config
+        # 不下载任何模型：不拉取远端模型清单（避免清单内容写入状态文件/缓存目录）
+        if not self.skip_models:
+            models_config, script_sha, parsed_ok, manifest_norm = \
+                self._fetch_manifest(root_files)
+            plan.script_sha256 = script_sha or ""
+            plan.manifest_normalized = manifest_norm if parsed_ok else {}
+            self._manifest_models_config = models_config
 
-        if not self.skip_models and root_files:
-            plan.models = self._collect_model_updates(models_config, script_sha)
+            if root_files:
+                plan.models = self._collect_model_updates(models_config, script_sha)
         return plan
 
     def _exe_older_than_remote_archive(self, svc: ServiceRemote) -> tuple[bool, bool]:
@@ -3314,6 +3287,8 @@ class Deployer:
 
     def _capture_model_fingerprints(self):
         """记录本次安装的全部模型仓库指纹（更新候选判定用；尽力而为）。"""
+        if self.skip_models:
+            return
         try:
             ids = {n: cfg["model_id"] for n, cfg in self.models_config.items()}
             fps = self._query_model_fingerprints(ids)
@@ -3670,8 +3645,10 @@ class Deployer:
         else:
             self.log.error("服务已启动但健康检查超时")
             self.log.info(f"   请手动验证 http://{SERVICE_HOST}:{SERVICE_PORT}")
-            self._emit("error", message="服务启动失败（健康检查超时，请手动验证）")
             self._mark_deploy_task_error("健康检查超时，服务未就绪")
+            # 抛异常交给 execute() 统一发 error：此前这里只发 error 就正常返回，
+            # execute() 随后又发 done，把失败覆盖成"部署成功"
+            raise RuntimeError("服务启动失败（健康检查超时，请手动验证）")
 
     def _ensure_vision_enabled(self) -> bool:
         """确保 Vision 服务已启用：查询 → 未启用则启用 → 等待 15s → 再确认。"""

@@ -312,13 +312,14 @@ def collect_gpu_usage_snapshot(reader: GpuEngineCounterReader, phys_index: int |
             phys_indexes = metrics["phys_indexes"]
             assert isinstance(phys_indexes, set)
             phys_indexes.add(sample_phys_index)
-        if "3d" in engine:
+        if "3d" in engine or engine.startswith("graphics"):
             metrics["three_d"] += value
         elif "decode" in engine:
             metrics["decoder"] += value
         elif "encode" in engine:
             metrics["encoder"] += value
 
+    excluded = load_exclude_process_names()
     process_names = list_process_names()
     missing_name_pids: list[int] = []
     usages: list[ProcessGpuUsage] = []
@@ -327,6 +328,10 @@ def collect_gpu_usage_snapshot(reader: GpuEngineCounterReader, phys_index: int |
         if not name:
             missing_name_pids.append(pid)
             name = f"pid-{pid}"
+        if name.lower() in excluded:
+            # 排除清单内的系统/非游戏进程（dwm、浏览器、启动器等）不进快照，
+            # 避免单帧采样被桌面合成抢走第一名
+            continue
         phys_indexes = metrics["phys_indexes"]
         assert isinstance(phys_indexes, set)
         usages.append(

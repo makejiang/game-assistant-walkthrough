@@ -372,17 +372,18 @@ def _service_answers_on(port: int, timeout: float = 2.0) -> bool:
 
 def resolve_service_port() -> int:
     """服务端实际监听端口：先试新版默认 22919，身份校验通过才用；不通再回退
-    旧版 9190（旧服务端已发布出去）。结果缓存；两个端口都无应答时返回 22919，
-    让后续请求自然报连接错误。"""
+    旧版 9190（旧服务端已发布出去）。只缓存探测成功的结果；两个端口都无应答时
+    返回 22919（让后续请求自然报连接错误）但**不缓存**，下次调用重新探测——
+    否则 ensure() 轮询期间服务才起来、且监听在 9190 时，会一直拿着缓存的 22919
+    探测而永远不通（死循环）。"""
     global _resolved_port
-    if _resolved_port is None:
-        for port in (SERVICE_PORT, SERVICE_PORT_LEGACY):
-            if _service_answers_on(port):
-                _resolved_port = port
-                break
-        else:
-            _resolved_port = SERVICE_PORT
-    return _resolved_port
+    if _resolved_port is not None:
+        return _resolved_port
+    for port in (SERVICE_PORT, SERVICE_PORT_LEGACY):
+        if _service_answers_on(port):
+            _resolved_port = port
+            return port
+    return SERVICE_PORT
 
 
 def _service_url() -> str:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -77,6 +78,98 @@ def _run_command(command: list[str], cwd: Path, on_line=None) -> int:
                 except Exception:
                     pass  # 进度上报失败不影响任务本身
     return int(process.wait())
+
+
+def _consume_pending_update(images_json: Path) -> tuple[set[str], bool]:
+    """读取下载器留下的更新清单（_update_tmp/pending_update.json，每次下载
+    都会覆写，陈旧文件自然失效）。
+
+    返回 (标题变化页 URL 集合, 是否有下架页待清理)。文件缺失/损坏按
+    (空, False) 处理——只影响更新动作，不影响正常下载导入。"""
+    pending_file = images_json.parent / "_update_tmp" / "pending_update.json"
+    try:
+        pending = json.loads(pending_file.read_text(encoding="utf-8"))
+        force_urls = {
+            str(u)
+            for u in (pending.get("changed_urls") or [])
+            if isinstance(u, str) and u.strip()
+        }
+        prune_pending = bool(pending.get("prune"))
+    except (ValueError, OSError, AttributeError):
+        return set(), False
+    try:
+        pending_file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return force_urls, prune_pending
+
+
+def _run_targeted_force_imports(
+    *,
+    game_name: str,
+    images_json: Path,
+    force_urls: set[str],
+    host: str,
+    timeout: float,
+    reporter: "DownloadProgressReporter",
+) -> None:
+    """标题变化页进程内定向强导：每页用只含该页的临时 json 走
+    force_reimport=True（删除范围=该页场景），不影响其它已入库页的正常使用。
+    临时 json 放 _update_tmp 独立子目录，避免导入器把正式 scene_map.json
+    冲成单页；单页失败只记日志，不中断其余页。"""
+    from app.walkthrough_service_importer import WalkthroughServiceImporter
+
+    try:
+        payload = json.loads(images_json.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return
+    pages = payload.get("pages") if isinstance(payload, dict) else None
+    if not isinstance(pages, list):
+        return
+    importer = WalkthroughServiceImporter(host=host, timeout=timeout)
+    temp_dir = images_json.parent / "_update_tmp"
+    temp_dir.mkdir(exist_ok=True)
+    try:
+        for url in sorted(force_urls):
+            record = next(
+                (
+                    p
+                    for p in pages
+                    if isinstance(p, dict) and str(p.get("url") or "").strip() == url
+                ),
+                None,
+            )
+            if record is None:
+                continue
+            temp_json = temp_dir / "force_page.json"
+            temp_json.write_text(
+                json.dumps(
+                    {"game": game_name, "pages": [record]},
+                    ensure_ascii=False,
+                    indent=4,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                reporter.update_from_line(f"[update] 定向重导标题变化页: {url}")
+                importer.sync_images_from_json(
+                    instance_id=game_name,
+                    images_json_path=temp_json,
+                    force_reimport=True,
+                    progress_callback=reporter.update_from_line,
+                )
+            except Exception as exc:
+                print(f"[update] 定向重导失败 {url}: {exc}", flush=True)
+            finally:
+                try:
+                    temp_json.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    finally:
+        try:
+            importer.close()
+        except Exception:
+            pass
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -163,9 +256,22 @@ def main() -> int:
         print(f"error: downloaded walkthrough json not found: {images_json}", file=sys.stderr)
         return 2
 
-    # 2) 导入（vision 模式：把每张攻略图片作为 scene 插入并 build）
-    # 未显式指定 --host 时先探测服务端端口（22919，不通回退旧版 9190）
+    # 2) 消费下载器的更新清单（_update_tmp/pending_update.json）：标题变化页
+    #    进程内定向强导（每页独立，不影响其它已入库页的正常使用）；下架页经
+    #    --prune-missing 交由导入器按差集删除对应服务端场景。
     service_host = resolve_service_host(args.host, log=print)
+    force_urls, prune_pending = _consume_pending_update(images_json)
+    if force_urls:
+        _run_targeted_force_imports(
+            game_name=game_name,
+            images_json=images_json,
+            force_urls=force_urls,
+            host=service_host,
+            timeout=args.import_timeout,
+            reporter=reporter,
+        )
+
+    # 3) 导入（vision 模式：把每张攻略图片作为 scene 插入并 build）
     import_command = [
         sys.executable,
         "-m",
@@ -181,6 +287,8 @@ def main() -> int:
     ]
     if args.force_reimport:
         import_command.append("--force-reimport")
+    if prune_pending:
+        import_command.append("--prune-missing")
     if args.verbose:
         import_command.append("--verbose")
 
